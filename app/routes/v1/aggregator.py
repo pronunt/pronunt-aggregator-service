@@ -15,12 +15,13 @@ from app.schemas.pull_request import (
 from app.services.aggregator import AggregatorService, get_aggregator_service
 
 router = APIRouter(tags=["aggregator"])
+aggregator_access_dependency = Depends(require_roles("developer", "reviewer", "release"))
 
 
 @router.post("/prs", response_model=PullRequestResponse, status_code=status.HTTP_201_CREATED)
 def upsert_pull_request(
     payload: PullRequestUpsertRequest,
-    _: AuthContext = Depends(require_roles("developer", "reviewer", "release")),
+    _: AuthContext = aggregator_access_dependency,
     service: AggregatorService = Depends(get_aggregator_service),
 ) -> PullRequestResponse:
     return service.upsert_pull_request(payload)
@@ -39,7 +40,7 @@ def list_pull_requests(
     sort_direction: SortDirection = SortDirection.desc,
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    _: AuthContext = Depends(require_roles("developer", "reviewer", "release")),
+    _: AuthContext = aggregator_access_dependency,
     service: AggregatorService = Depends(get_aggregator_service),
 ) -> PullRequestListResponse:
     filters = PullRequestFilters(
@@ -57,7 +58,7 @@ def list_pull_requests(
 @router.get("/prs/{pr_id}", response_model=PullRequestResponse)
 def get_pull_request(
     pr_id: str,
-    _: AuthContext = Depends(require_roles("developer", "reviewer", "release")),
+    _: AuthContext = aggregator_access_dependency,
     service: AggregatorService = Depends(get_aggregator_service),
 ) -> PullRequestResponse:
     return service.get_pull_request(pr_id)
@@ -66,7 +67,7 @@ def get_pull_request(
 @router.post("/prs/{pr_id}/score", response_model=PullRequestResponse)
 def recompute_pull_request_scores(
     pr_id: str,
-    _: AuthContext = Depends(require_roles("developer", "reviewer", "release")),
+    _: AuthContext = aggregator_access_dependency,
     service: AggregatorService = Depends(get_aggregator_service),
 ) -> PullRequestResponse:
     return service.recompute_pull_request_scores(pr_id)
@@ -74,7 +75,7 @@ def recompute_pull_request_scores(
 
 @router.get("/summary", response_model=AggregatorSummaryResponse)
 def get_summary(
-    _: AuthContext = Depends(require_roles("developer", "reviewer", "release")),
+    _: AuthContext = aggregator_access_dependency,
     service: AggregatorService = Depends(get_aggregator_service),
 ) -> AggregatorSummaryResponse:
     return service.get_summary()

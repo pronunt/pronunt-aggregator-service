@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Protocol
 
 from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import Depends, status
 from pymongo import ASCENDING, DESCENDING
 from pymongo.collection import Collection
@@ -25,6 +26,10 @@ from app.schemas.pull_request import (
     ServiceCriticality,
     SortDirection,
 )
+
+OPEN_PULL_REQUEST_STATE = "open"
+PULL_REQUEST_NOT_FOUND_CODE = "pull_request_not_found"
+PULL_REQUEST_NOT_FOUND_MESSAGE = "Pull request was not found."
 
 
 def _utc_now() -> datetime:
@@ -113,7 +118,7 @@ class MongoPullRequestRepository:
         self.collection.create_index([("state", ASCENDING), ("priority_score", DESCENDING)])
 
     def upsert(self, payload: PullRequestUpsertRequest, scorecard: Scorecard) -> dict:
-        document = build_pull_request_document(payload.model_dump(), scorecard.__dict__)
+        document = build_pull_request_document(payload, scorecard)
         self.collection.update_one(
             {"pr_uid": document["pr_uid"]},
             {"$set": document},
@@ -124,7 +129,7 @@ class MongoPullRequestRepository:
     def get_by_id(self, pr_id: str) -> dict | None:
         try:
             return self.collection.find_one({"_id": ObjectId(pr_id)})
-        except Exception:
+        except InvalidId:
             return None
 
     def list(
@@ -158,7 +163,7 @@ class MongoPullRequestRepository:
     def recompute_scores(self, pr_id: str, scorecard: Scorecard) -> dict | None:
         try:
             object_id = ObjectId(pr_id)
-        except Exception:
+        except InvalidId:
             return None
 
         update = {
@@ -177,15 +182,15 @@ class MongoPullRequestRepository:
 
     def summary(self) -> AggregatorSummaryResponse:
         return AggregatorSummaryResponse(
-            total_open=self.collection.count_documents({"state": "open"}),
-            total_stale=self.collection.count_documents({"state": "open", "stale": True}),
-            total_high_risk=self.collection.count_documents({"state": "open", "risk_score": {"$gte": 70}}),
-            total_high_priority=self.collection.count_documents({"state": "open", "priority_score": {"$gte": 70}}),
+            total_open=self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE}),
+            total_stale=self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "stale": True}),
+            total_high_risk=self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "risk_score": {"$gte": 70}}),
+            total_high_priority=self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "priority_score": {"$gte": 70}}),
             by_criticality={
-                "low": self.collection.count_documents({"state": "open", "criticality": "low"}),
-                "medium": self.collection.count_documents({"state": "open", "criticality": "medium"}),
-                "high": self.collection.count_documents({"state": "open", "criticality": "high"}),
-                "critical": self.collection.count_documents({"state": "open", "criticality": "critical"}),
+                "low": self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "criticality": "low"}),
+                "medium": self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "criticality": "medium"}),
+                "high": self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "criticality": "high"}),
+                "critical": self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE, "criticality": "critical"}),
             },
         )
 
@@ -203,12 +208,7 @@ class AggregatorService:
     def get_pull_request(self, pr_id: str) -> PullRequestResponse:
         document = self.repository.get_by_id(pr_id)
         if not document:
-            raise AppException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="pull_request_not_found",
-                message="Pull request was not found.",
-                details={"pr_id": pr_id},
-            )
+            self._raise_not_found(pr_id)
         return self._to_response(document)
 
     def list_pull_requests(
@@ -225,22 +225,12 @@ class AggregatorService:
     def recompute_pull_request_scores(self, pr_id: str) -> PullRequestResponse:
         current = self.repository.get_by_id(pr_id)
         if not current:
-            raise AppException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="pull_request_not_found",
-                message="Pull request was not found.",
-                details={"pr_id": pr_id},
-            )
+            self._raise_not_found(pr_id)
 
-        payload = PullRequestUpsertRequest(**{key: value for key, value in current.items() if key not in {"_id", "pr_uid", "risk_score", "priority_score", "stale", "stale_hours", "score_breakdown", "synced_at", "last_scored_at"}})
+        payload = self._build_payload_from_document(current)
         document = self.repository.recompute_scores(pr_id, self._build_scorecard(payload))
         if not document:
-            raise AppException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="pull_request_not_found",
-                message="Pull request was not found.",
-                details={"pr_id": pr_id},
-            )
+            self._raise_not_found(pr_id)
         return self._to_response(document)
 
     def get_summary(self) -> AggregatorSummaryResponse:
@@ -282,6 +272,29 @@ class AggregatorService:
         response_data = dict(document)
         response_data["id"] = str(response_data.pop("_id"))
         return PullRequestResponse.model_validate(response_data)
+
+    def _build_payload_from_document(self, document: dict) -> PullRequestUpsertRequest:
+        ignored_fields = {
+            "_id",
+            "pr_uid",
+            "risk_score",
+            "priority_score",
+            "stale",
+            "stale_hours",
+            "score_breakdown",
+            "synced_at",
+            "last_scored_at",
+        }
+        payload = {key: value for key, value in document.items() if key not in ignored_fields}
+        return PullRequestUpsertRequest(**payload)
+
+    def _raise_not_found(self, pr_id: str) -> None:
+        raise AppException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=PULL_REQUEST_NOT_FOUND_CODE,
+            message=PULL_REQUEST_NOT_FOUND_MESSAGE,
+            details={"pr_id": pr_id},
+        )
 
 
 @lru_cache(maxsize=1)
