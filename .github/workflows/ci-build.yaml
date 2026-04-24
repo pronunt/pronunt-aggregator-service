@@ -81,7 +81,7 @@ jobs:
       values_file: apps/${{ github.event.repository.name }}/values-test.yaml
       image_tag: ${{ needs.docker-build.outputs.image_tag }}
       yaml_path: .image.tag
-      commit_message: ci(${{ github.event.repository.name }}): update test image tag to ${{ needs.docker-build.outputs.image_tag }}
+      commit_message: "ci(${{ github.event.repository.name }}): update test image tag to ${{ needs.docker-build.outputs.image_tag }}"
     secrets:
       HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
 

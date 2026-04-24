@@ -67,7 +67,7 @@ jobs:
       values_file: apps/${{ github.event.repository.name }}/values-prod.yaml
       image_tag: ${{ needs.promote.outputs.version }}
       yaml_path: .image.tag
-      commit_message: release(${{ github.event.repository.name }}): promote image to ${{ needs.promote.outputs.version }}
+      commit_message: "release(${{ github.event.repository.name }}): promote image to ${{ needs.promote.outputs.version }}"
     secrets:
       HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
 

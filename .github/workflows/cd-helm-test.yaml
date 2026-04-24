@@ -21,7 +21,7 @@ on:
         type: string
       commit_message:
         required: false
-        default: ci: update image tag
+        default: "ci: update image tag"
         type: string
     secrets:
       HELM_REPO_TOKEN:
