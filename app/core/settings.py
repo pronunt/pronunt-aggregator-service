@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     request_id_header: str = "X-Request-ID"
     http_timeout_seconds: float = 10.0
+    mongodb_uri: str = "mongodb://localhost:27017"
+    mongodb_database: str = "pronunt"
+    mongodb_pr_collection: str = "aggregator_pull_requests"
+    aggregator_stale_after_hours: int = 72
 
     auth_enabled: bool = False
     allow_unsafe_dev_auth: bool = True
@@ -29,6 +33,14 @@ class Settings(BaseSettings):
 
         if self.http_timeout_seconds <= 0:
             errors.append("HTTP_TIMEOUT_SECONDS must be greater than 0.")
+        if not self.mongodb_uri:
+            errors.append("MONGODB_URI is required.")
+        if not self.mongodb_database:
+            errors.append("MONGODB_DATABASE is required.")
+        if not self.mongodb_pr_collection:
+            errors.append("MONGODB_PR_COLLECTION is required.")
+        if self.aggregator_stale_after_hours <= 0:
+            errors.append("AGGREGATOR_STALE_AFTER_HOURS must be greater than 0.")
 
         if self.auth_enabled:
             if not self.keycloak_issuer:

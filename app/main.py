@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import AccessLogMiddleware, RequestContextMiddleware
-from app.core.settings import Settings, get_settings
+from app.core.settings import get_settings
 from app.routes.health import router as health_router
+from app.routes.v1 import router as v1_router
 
 
 @asynccontextmanager
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AccessLogMiddleware)
     register_exception_handlers(app)
     app.include_router(health_router)
+    app.include_router(v1_router, prefix="/api/v1/aggregator")
     return app
 
 
