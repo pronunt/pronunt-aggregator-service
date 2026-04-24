@@ -49,6 +49,17 @@ class PullRequestUpsertRequest(BaseModel):
     impact_services: list[str] = Field(default_factory=list)
     ai_summary: str | None = None
 
+    def model_with_resolved_metadata(
+        self,
+        *,
+        criticality: ServiceCriticality,
+        impact_services: list[str],
+    ) -> "PullRequestUpsertRequest":
+        payload = self.model_dump()
+        payload["criticality"] = criticality
+        payload["impact_services"] = impact_services
+        return PullRequestUpsertRequest(**payload)
+
 
 class ScoreBreakdown(BaseModel):
     size_score: int

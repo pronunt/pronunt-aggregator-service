@@ -7,14 +7,17 @@ from typing import Protocol
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import Depends, status
+from fastapi import Depends, Request, status
 from pymongo import ASCENDING, DESCENDING
 from pymongo.collection import Collection
 
+from app.core.auth import AuthContext
 from app.core.database import get_pull_request_collection
 from app.core.exceptions import AppException
+from app.core.http import service_request
 from app.core.settings import Settings, get_settings
 from app.models.pull_request import build_pull_request_document
+from app.schemas.config import ConfigImpactResponse, ConfigServiceResponse
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
     PullRequestFilters,
@@ -99,6 +102,12 @@ class Scorecard:
     score_breakdown: dict[str, int]
 
 
+@dataclass
+class ResolvedPullRequestMetadata:
+    criticality: ServiceCriticality
+    impact_services: list[str]
+
+
 class PullRequestRepository(Protocol):
     def upsert(self, payload: PullRequestUpsertRequest, scorecard: Scorecard) -> dict: ...
 
@@ -109,6 +118,15 @@ class PullRequestRepository(Protocol):
     def recompute_scores(self, pr_id: str, scorecard: Scorecard) -> dict | None: ...
 
     def summary(self) -> AggregatorSummaryResponse: ...
+
+
+class ConfigResolver(Protocol):
+    async def resolve_pull_request_metadata(
+        self,
+        payload: PullRequestUpsertRequest,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> ResolvedPullRequestMetadata: ...
 
 
 class MongoPullRequestRepository:
@@ -196,13 +214,20 @@ class MongoPullRequestRepository:
 
 
 class AggregatorService:
-    def __init__(self, repository: PullRequestRepository, settings: Settings) -> None:
+    def __init__(self, repository: PullRequestRepository, settings: Settings, config_resolver: ConfigResolver) -> None:
         self.repository = repository
         self.settings = settings
+        self.config_resolver = config_resolver
 
-    def upsert_pull_request(self, payload: PullRequestUpsertRequest) -> PullRequestResponse:
-        scorecard = self._build_scorecard(payload)
-        document = self.repository.upsert(payload, scorecard)
+    async def upsert_pull_request(
+        self,
+        payload: PullRequestUpsertRequest,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> PullRequestResponse:
+        resolved_payload = await self._build_resolved_payload(payload, request, auth_context)
+        scorecard = self._build_scorecard(resolved_payload)
+        document = self.repository.upsert(resolved_payload, scorecard)
         return self._to_response(document)
 
     def get_pull_request(self, pr_id: str) -> PullRequestResponse:
@@ -222,13 +247,19 @@ class AggregatorService:
         documents, total = self.repository.list(filters, sort_by, sort_direction, limit, offset)
         return PullRequestListResponse(items=[self._to_response(document) for document in documents], total=total)
 
-    def recompute_pull_request_scores(self, pr_id: str) -> PullRequestResponse:
+    async def recompute_pull_request_scores(
+        self,
+        pr_id: str,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> PullRequestResponse:
         current = self.repository.get_by_id(pr_id)
         if not current:
             self._raise_not_found(pr_id)
 
         payload = self._build_payload_from_document(current)
-        document = self.repository.recompute_scores(pr_id, self._build_scorecard(payload))
+        resolved_payload = await self._build_resolved_payload(payload, request, auth_context)
+        document = self.repository.recompute_scores(pr_id, self._build_scorecard(resolved_payload))
         if not document:
             self._raise_not_found(pr_id)
         return self._to_response(document)
@@ -273,6 +304,18 @@ class AggregatorService:
         response_data["id"] = str(response_data.pop("_id"))
         return PullRequestResponse.model_validate(response_data)
 
+    async def _build_resolved_payload(
+        self,
+        payload: PullRequestUpsertRequest,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> PullRequestUpsertRequest:
+        metadata = await self.config_resolver.resolve_pull_request_metadata(payload, request, auth_context)
+        return payload.model_with_resolved_metadata(
+            criticality=metadata.criticality,
+            impact_services=metadata.impact_services,
+        )
+
     def _build_payload_from_document(self, document: dict) -> PullRequestUpsertRequest:
         ignored_fields = {
             "_id",
@@ -297,13 +340,51 @@ class AggregatorService:
         )
 
 
+class HttpConfigResolver:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def resolve_pull_request_metadata(
+        self,
+        payload: PullRequestUpsertRequest,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> ResolvedPullRequestMetadata:
+        service_response = await service_request(
+            "GET",
+            f"{self.settings.config_service_url}/api/v1/config/repos/{payload.repository_full_name}",
+            request=request,
+            auth_context=auth_context,
+        )
+        service_config = ConfigServiceResponse.model_validate(service_response.json())
+
+        impact_response = await service_request(
+            "GET",
+            f"{self.settings.config_service_url}/api/v1/config/impact/{service_config.service_name}",
+            request=request,
+            auth_context=auth_context,
+        )
+        impact = ConfigImpactResponse.model_validate(impact_response.json())
+        impact_services = sorted(set(impact.direct_dependencies + impact.downstream_services))
+
+        return ResolvedPullRequestMetadata(
+            criticality=service_config.criticality,
+            impact_services=impact_services,
+        )
+
+
 @lru_cache(maxsize=1)
 def get_pull_request_repository() -> PullRequestRepository:
     return MongoPullRequestRepository(get_pull_request_collection())
 
 
+def get_config_resolver(settings: Settings = Depends(get_settings)) -> ConfigResolver:
+    return HttpConfigResolver(settings)
+
+
 def get_aggregator_service(
     repository: PullRequestRepository = Depends(get_pull_request_repository),
     settings: Settings = Depends(get_settings),
+    config_resolver: ConfigResolver = Depends(get_config_resolver),
 ) -> AggregatorService:
-    return AggregatorService(repository=repository, settings=settings)
+    return AggregatorService(repository=repository, settings=settings, config_resolver=config_resolver)

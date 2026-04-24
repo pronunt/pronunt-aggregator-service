@@ -1,7 +1,10 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from bson import ObjectId
+from fastapi import Request
 
+from app.core.auth import AuthContext
 from app.core.settings import Settings
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
@@ -12,7 +15,7 @@ from app.schemas.pull_request import (
     ServiceCriticality,
     SortDirection,
 )
-from app.services.aggregator import AggregatorService, Scorecard
+from app.services.aggregator import AggregatorService, ResolvedPullRequestMetadata, Scorecard
 
 
 class FakePullRequestRepository:
@@ -82,6 +85,18 @@ class FakePullRequestRepository:
         )
 
 
+class FakeConfigResolver:
+    def __init__(self, criticality: ServiceCriticality = ServiceCriticality.high, impact_services: list[str] | None = None) -> None:
+        self.criticality = criticality
+        self.impact_services = impact_services or ["pronunt-config-service", "pronunt-ai-service"]
+
+    async def resolve_pull_request_metadata(self, payload, request, auth_context) -> ResolvedPullRequestMetadata:
+        return ResolvedPullRequestMetadata(
+            criticality=self.criticality,
+            impact_services=self.impact_services,
+        )
+
+
 def _build_payload(
     number: int = 1,
     hours_ago: int = 10,
@@ -113,9 +128,15 @@ def _build_payload(
 
 
 def test_upsert_assigns_scores_and_persists_document() -> None:
-    service = AggregatorService(FakePullRequestRepository(), Settings(_env_file=None, allow_unsafe_dev_auth=True))
+    service = AggregatorService(
+        FakePullRequestRepository(),
+        Settings(_env_file=None, allow_unsafe_dev_auth=True),
+        FakeConfigResolver(),
+    )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
 
-    response = service.upsert_pull_request(_build_payload(hours_ago=6))
+    response = asyncio.run(service.upsert_pull_request(_build_payload(hours_ago=6), request, auth_context))
 
     assert response.repository_name == "pronunt-aggregator-service"
     assert response.risk_score > 0
@@ -127,9 +148,12 @@ def test_stale_pull_request_gets_marked_and_prioritized() -> None:
     service = AggregatorService(
         FakePullRequestRepository(),
         Settings(_env_file=None, allow_unsafe_dev_auth=True, aggregator_stale_after_hours=48),
+        FakeConfigResolver(criticality=ServiceCriticality.critical),
     )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
 
-    response = service.upsert_pull_request(_build_payload(hours_ago=96, criticality=ServiceCriticality.critical))
+    response = asyncio.run(service.upsert_pull_request(_build_payload(hours_ago=96), request, auth_context))
 
     assert response.stale is True
     assert response.stale_hours >= 96
@@ -138,9 +162,15 @@ def test_stale_pull_request_gets_marked_and_prioritized() -> None:
 
 def test_list_and_summary_reflect_persisted_pull_requests() -> None:
     repository = FakePullRequestRepository()
-    service = AggregatorService(repository, Settings(_env_file=None, allow_unsafe_dev_auth=True))
-    service.upsert_pull_request(_build_payload(number=1, hours_ago=96))
-    service.upsert_pull_request(_build_payload(number=2, hours_ago=8))
+    service = AggregatorService(
+        repository,
+        Settings(_env_file=None, allow_unsafe_dev_auth=True),
+        FakeConfigResolver(),
+    )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
+    asyncio.run(service.upsert_pull_request(_build_payload(number=1, hours_ago=96), request, auth_context))
+    asyncio.run(service.upsert_pull_request(_build_payload(number=2, hours_ago=8), request, auth_context))
 
     listing = service.list_pull_requests(PullRequestFilters(), PullRequestSortField.priority_score, SortDirection.desc, 25, 0)
     summary = service.get_summary()
@@ -148,3 +178,22 @@ def test_list_and_summary_reflect_persisted_pull_requests() -> None:
     assert listing.total == 2
     assert len(listing.items) == 2
     assert summary.total_open == 2
+
+
+def test_config_metadata_overrides_incoming_payload_values() -> None:
+    service = AggregatorService(
+        FakePullRequestRepository(),
+        Settings(_env_file=None, allow_unsafe_dev_auth=True),
+        FakeConfigResolver(
+            criticality=ServiceCriticality.critical,
+            impact_services=["pronunt-worker-service", "pronunt-frontend-service"],
+        ),
+    )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
+    payload = _build_payload(number=3, hours_ago=6, criticality=ServiceCriticality.low)
+
+    response = asyncio.run(service.upsert_pull_request(payload, request, auth_context))
+
+    assert response.criticality == ServiceCriticality.critical
+    assert response.impact_services == ["pronunt-frontend-service", "pronunt-worker-service"]

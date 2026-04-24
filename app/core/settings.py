@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     mongodb_database: str = "pronunt"
     mongodb_pr_collection: str = "aggregator_pull_requests"
     aggregator_stale_after_hours: int = 72
+    config_service_url: str = "http://pronunt-config-service:8000"
 
     auth_enabled: bool = False
     allow_unsafe_dev_auth: bool = True
@@ -41,6 +42,8 @@ class Settings(BaseSettings):
             errors.append("MONGODB_PR_COLLECTION is required.")
         if self.aggregator_stale_after_hours <= 0:
             errors.append("AGGREGATOR_STALE_AFTER_HOURS must be greater than 0.")
+        if not self.config_service_url:
+            errors.append("CONFIG_SERVICE_URL is required.")
 
         if self.auth_enabled:
             if not self.keycloak_issuer:

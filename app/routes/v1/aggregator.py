@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.core.auth import AuthContext, require_roles
 from app.schemas.pull_request import (
@@ -45,12 +45,13 @@ def build_pull_request_filters(
 
 
 @router.post("/prs", status_code=status.HTTP_201_CREATED)
-def upsert_pull_request(
+async def upsert_pull_request(
     payload: PullRequestUpsertRequest,
-    _: AggregatorAccessDependency,
+    request: Request,
+    auth_context: AggregatorAccessDependency,
     service: AggregatorServiceDependency,
 ) -> PullRequestResponse:
-    return service.upsert_pull_request(payload)
+    return await service.upsert_pull_request(payload, request, auth_context)
 
 
 @router.get("/prs")
@@ -76,12 +77,13 @@ def get_pull_request(
 
 
 @router.post("/prs/{pr_id}/score")
-def recompute_pull_request_scores(
+async def recompute_pull_request_scores(
     pr_id: str,
-    _: AggregatorAccessDependency,
+    request: Request,
+    auth_context: AggregatorAccessDependency,
     service: AggregatorServiceDependency,
 ) -> PullRequestResponse:
-    return service.recompute_pull_request_scores(pr_id)
+    return await service.recompute_pull_request_scores(pr_id, request, auth_context)
 
 
 @router.get("/summary")
