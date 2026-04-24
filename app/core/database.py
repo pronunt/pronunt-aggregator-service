@@ -3,7 +3,6 @@ from functools import lru_cache
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
-from pymongo.errors import PyMongoError
 
 from app.core.settings import Settings, get_settings
 
@@ -25,7 +24,4 @@ def get_pull_request_collection(settings: Settings | None = None) -> Collection:
 
 
 def ping_database() -> None:
-    try:
-        get_mongo_client().admin.command("ping")
-    except PyMongoError:
-        raise
+    get_mongo_client().admin.command("ping")
