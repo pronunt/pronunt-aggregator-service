@@ -19,7 +19,7 @@ class AppException(Exception):
         super().__init__(message)
 
 
-async def app_exception_handler(_: Request, exc: AppException) -> JSONResponse:
+def app_exception_handler(_: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -31,7 +31,7 @@ async def app_exception_handler(_: Request, exc: AppException) -> JSONResponse:
     )
 
 
-async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -43,7 +43,7 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
     )
 
 
-async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled application error", exc_info=exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

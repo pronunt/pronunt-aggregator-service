@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -18,7 +19,6 @@ async def service_request(
     request: Request | None = None,
     auth_context: AuthContext | None = None,
     headers: dict[str, str] | None = None,
-    timeout: float | None = None,
     **kwargs: Any,
 ) -> httpx.Response:
     settings = get_settings()
@@ -31,11 +31,19 @@ async def service_request(
         outbound_headers.update(headers)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout or settings.http_timeout_seconds) as client:
-            response = await client.request(method, url, headers=outbound_headers, **kwargs)
-            response.raise_for_status()
-            return response
+        async with httpx.AsyncClient() as client:
+            async with asyncio.timeout(settings.http_timeout_seconds):
+                response = await client.request(method, url, headers=outbound_headers, **kwargs)
+                response.raise_for_status()
+                return response
     except httpx.TimeoutException as exc:
+        raise AppException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            code="upstream_timeout",
+            message="Upstream service request timed out.",
+            details={"url": url, "method": method},
+        ) from exc
+    except TimeoutError as exc:
         raise AppException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             code="upstream_timeout",
