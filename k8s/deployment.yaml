@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pronunt-aggregator-service
+  namespace: prism
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pronunt-aggregator-service
+  template:
+    metadata:
+      labels:
+        app: pronunt-aggregator-service
+    spec:
+      containers:
+        - name: pronunt-aggregator-service
+          image: ghcr.io/pronunt/pronunt-aggregator-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: pronunt-aggregator-service-config
+            - secretRef:
+                name: pronunt-aggregator-service-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+

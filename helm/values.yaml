@@ -1,0 +1,56 @@
+fullnameOverride: pronunt-aggregator-service
+
+namespace:
+  create: false
+  name: prism
+
+image:
+  repository: ghcr.io/pronunt/pronunt-aggregator-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+containerPort: 8000
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8000
+  targetPort: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: pronunt-aggregator-service.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
+env:
+  config:
+    APP_NAME: pronunt-aggregator-service
+    APP_ENV: production
+    APP_HOST: 0.0.0.0
+    APP_PORT: "8000"
+    LOG_LEVEL: INFO
+    CONFIG_SERVICE_URL: http://pronunt-config-service:8000
+    AI_SERVICE_URL: http://pronunt-ai-service:8000
+  secret:
+    AGGREGATOR_SIGNING_KEY: change-me
+

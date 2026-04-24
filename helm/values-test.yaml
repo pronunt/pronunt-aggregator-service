@@ -1,0 +1,7 @@
+image:
+  tag: test
+
+env:
+  config:
+    APP_ENV: test
+

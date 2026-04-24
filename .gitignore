@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.local
+.pytest_cache/
+.mypy_cache/
 dist/
 build/
-
+.next/
+node_modules/

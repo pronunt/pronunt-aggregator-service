@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.fullnameOverride }}
+  namespace: {{ .Values.namespace.name }}
+spec:
+  replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}{{ else }}1{{ end }}
+  selector:
+    matchLabels:
+      app: {{ .Values.fullnameOverride }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.fullnameOverride }}
+    spec:
+      containers:
+        - name: {{ .Values.fullnameOverride }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Values.fullnameOverride }}-config
+            - secretRef:
+                name: {{ .Values.fullnameOverride }}-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+
