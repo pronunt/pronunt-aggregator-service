@@ -1,4 +1,4 @@
-name: Merged PR Image Pipeline
+name: Pronunt service Image workflow pipeline
 
 on:
   pull_request:
@@ -105,3 +105,4 @@ jobs:
           slack_webhook: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
           workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           report_url: ${{ needs.docker-build.outputs.report_url }}
+

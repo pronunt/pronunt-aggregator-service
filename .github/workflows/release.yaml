@@ -1,4 +1,4 @@
-name: Release Pipeline
+name: Pronunt Release Pipeline
 
 on:
   release:
@@ -70,3 +70,4 @@ jobs:
       commit_message: release(${{ github.event.repository.name }}): promote image to ${{ needs.promote.outputs.version }}
     secrets:
       HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
+

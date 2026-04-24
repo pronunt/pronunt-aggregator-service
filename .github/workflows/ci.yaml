@@ -1,4 +1,4 @@
-name: PR Validation
+name: Pronunt Pipeline
 
 on:
   pull_request:
@@ -86,3 +86,4 @@ jobs:
           slack_webhook: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
           workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           report_url: https://app.snyk.io/org/${{ secrets.SNYK_ORG }}/projects/${{ secrets.SNYK_PROJECT_ID }}
+
