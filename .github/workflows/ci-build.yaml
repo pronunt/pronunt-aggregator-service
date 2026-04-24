@@ -1,0 +1,107 @@
+name: Merged PR Image Pipeline
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+concurrency:
+  group: pronunt-merge-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+  packages: write
+
+jobs:
+  get-email:
+    runs-on: ubuntu-latest
+    outputs:
+      email: ${{ steps.author.outputs.email }}
+      name: ${{ steps.author.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: author
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          EMAIL=$(git show -s --format='%ae' "$SHA")
+          NAME=$(git show -s --format='%an' "$SHA")
+          echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.gate.outputs.should_build }}
+    steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - id: gate
+        run: |
+          export GH_TOKEN=${{ github.token }}
+          SHOULD_BUILD=false
+          if [ "${{ github.event.pull_request.merged }}" != "true" ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          if [[ ! "$BRANCH" =~ ^(feat|fix|dev|test|chore|refactor|docs)/.+$ ]]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! echo '${{ toJson(github.event.pull_request.labels.*.name) }}' | grep -q '"build"'; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews > reviews.json
+          APPROVED=$(jq -r 'map(select(.state == "APPROVED")) | length > 0' reviews.json)
+          if [ "$APPROVED" = "true" ]; then
+            SHOULD_BUILD=true
+          fi
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+
+  docker-build:
+    needs: gate
+    if: ${{ needs.gate.outputs.should_build == 'true' }}
+    uses: ./.github/workflows/ci-docker-build.yaml
+    secrets: inherit
+
+  update-helm-test-values:
+    needs: [gate, docker-build]
+    if: ${{ needs.gate.outputs.should_build == 'true' && needs.docker-build.result == 'success' }}
+    uses: ./.github/workflows/cd-helm-test.yaml
+    with:
+      helm_repo: pronunt/pronunt-helm-charts
+      helm_branch: test
+      values_file: apps/${{ github.event.repository.name }}/values-test.yaml
+      image_tag: ${{ needs.docker-build.outputs.image_tag }}
+      yaml_path: .image.tag
+      commit_message: ci(${{ github.event.repository.name }}): update test image tag to ${{ needs.docker-build.outputs.image_tag }}
+    secrets:
+      HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [gate, get-email, docker-build]
+    if: ${{ always() && needs.gate.outputs.should_build == 'true' && needs.docker-build.result == 'failure' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send image pipeline notification
+        uses: ./.github/actions/notification-action
+        with:
+          pipeline_name: ${{ github.workflow }}
+          repository_name: ${{ github.repository }}
+          failure_reason: ${{ needs.docker-build.outputs.failure_stage }}
+          author: ${{ needs.get-email.outputs.name || github.actor }}
+          smtp_username: ${{ secrets.SMTP_USERNAME }}
+          smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          mail_from: ${{ secrets.MAIL_FROM }}
+          mail_to: ${{ needs.get-email.outputs.email || secrets.MAIL_TO }}
+          slack_webhook: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
+          workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          report_url: ${{ needs.docker-build.outputs.report_url }}

@@ -1,0 +1,67 @@
+name: Docker Build and Push
+
+on:
+  workflow_call:
+    outputs:
+      image_tag:
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_repository:
+        value: ${{ jobs.build.outputs.image_repository }}
+      failure_stage:
+        value: ${{ jobs.build.outputs.failure_stage }}
+      report_url:
+        value: ${{ jobs.build.outputs.report_url }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_repository: ${{ steps.meta.outputs.image_repository }}
+      failure_stage: ${{ steps.failure.outputs.failure_stage }}
+      report_url: ${{ steps.meta.outputs.report_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: meta
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$SHA" ]; then
+            SHA="${{ github.sha }}"
+          fi
+          SHORT_SHA="${SHA::7}"
+          IMAGE="ghcr.io/$OWNER/$REPO"
+          echo "image_repository=$IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "report_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to DHI registry
+        if: ${{ secrets.DHI_USERNAME != '' && secrets.DHI_PASSWORD != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DHI_USERNAME }}
+          password: ${{ secrets.DHI_PASSWORD }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push image
+        id: build_push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.image_repository }}:${{ steps.meta.outputs.image_tag }}
+      - name: Set failure stage
+        id: failure
+        if: ${{ failure() }}
+        run: echo "failure_stage=docker-build" >> $GITHUB_OUTPUT

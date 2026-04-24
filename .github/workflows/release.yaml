@@ -1,0 +1,72 @@
+name: Release Pipeline
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.image.outputs.image }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - id: version
+        run: |
+          TAG='${{ github.event.release.tag_name }}'
+          REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta|rc)\.[0-9]+))?$'
+          if [[ ! "$TAG" =~ $REGEX ]]; then
+            echo "Invalid tag format: $TAG"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: image
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE=ghcr.io/$OWNER/$REPO
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+      - id: sha
+        run: |
+          TAG='${{ github.event.release.tag_name }}'
+          SHA=$(git rev-list -n 1 "$TAG")
+          SHORT_SHA="${SHA::7}"
+          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+      - name: Promote image
+        run: |
+          IMAGE=${{ steps.image.outputs.image }}
+          SHA=${{ steps.sha.outputs.sha }}
+          VERSION=${{ steps.version.outputs.version }}
+          docker pull $IMAGE:$SHA
+          docker tag $IMAGE:$SHA $IMAGE:$VERSION
+          for i in 1 2 3; do
+            docker push $IMAGE:$VERSION && break || sleep 5
+          done
+
+  update-helm-prod-values:
+    needs: promote
+    uses: ./.github/workflows/cd-helm-test.yaml
+    with:
+      helm_repo: pronunt/pronunt-helm-charts
+      helm_branch: prod
+      values_file: apps/${{ github.event.repository.name }}/values-prod.yaml
+      image_tag: ${{ needs.promote.outputs.version }}
+      yaml_path: .image.tag
+      commit_message: release(${{ github.event.repository.name }}): promote image to ${{ needs.promote.outputs.version }}
+    secrets:
+      HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}

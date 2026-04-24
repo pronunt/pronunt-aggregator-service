@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: pronunt-aggregator-service-config
-  namespace: prism
+  namespace: pronunt-app-ns
 data:
   APP_NAME: pronunt-aggregator-service
   APP_ENV: production
@@ -11,4 +11,5 @@ data:
   LOG_LEVEL: INFO
   CONFIG_SERVICE_URL: http://pronunt-config-service:8000
   AI_SERVICE_URL: http://pronunt-ai-service:8000
+
 
