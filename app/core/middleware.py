@@ -23,12 +23,10 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         try:
             response = await call_next(request)
+            response.headers[self.request_id_header] = request_id
+            return response
         finally:
-            pass
-
-        response.headers[self.request_id_header] = request_id
-        clear_request_id()
-        return response
+            clear_request_id()
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):

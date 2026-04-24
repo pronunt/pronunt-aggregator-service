@@ -1,10 +1,19 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import AccessLogMiddleware, RequestContextMiddleware
-from app.core.settings import get_settings
+from app.core.settings import Settings, get_settings
 from app.routes.health import router as health_router
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    settings = get_settings()
+    settings.validate_runtime()
+    yield
 
 
 def create_app() -> FastAPI:
@@ -15,7 +24,8 @@ def create_app() -> FastAPI:
         use_colors=settings.log_use_colors,
     )
 
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.state.settings = settings
     app.add_middleware(RequestContextMiddleware, request_id_header=settings.request_id_header)
     app.add_middleware(AccessLogMiddleware)
     register_exception_handlers(app)
