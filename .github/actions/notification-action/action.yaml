@@ -1,0 +1,102 @@
+name: Email and Slack Notification
+description: Send email and Slack notification
+
+inputs:
+  pipeline_name:
+    description: Name of the workflow or pipeline that triggered the notification.
+    required: true
+  repository_name:
+    description: Repository name associated with the failing workflow run.
+    required: true
+  failure_reason:
+    description: Human-readable reason for the failure shown in email and Slack.
+    required: true
+  author:
+    description: Pull request author or commit author associated with the run.
+    required: true
+  smtp_username:
+    description: SMTP username used to send email notifications.
+    required: true
+  smtp_password:
+    description: SMTP password or app password used to send email notifications.
+    required: true
+  mail_from:
+    description: Sender email address used in notification emails.
+    required: true
+  mail_to:
+    description: Recipient email address for the notification.
+    required: true
+  slack_webhook:
+    description: Incoming Slack webhook URL for posting failure alerts.
+    required: true
+  workflow_url:
+    description: Direct URL to the GitHub Actions workflow run.
+    required: true
+  report_url:
+    description: Direct URL to the relevant failure report or security dashboard.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Send email
+      uses: hilarion5/send-mail@v1
+      with:
+        smtp-server: smtp.hostinger.com
+        smtp-port: 587
+        smtp-secure: false
+        username: ${{ inputs.smtp_username }}
+        password: ${{ inputs.smtp_password }}
+        from-email: "Pronunt CI Alerts <${{ inputs.mail_from }}>"
+        to-email: ${{ inputs.mail_to }}
+        subject: "[CI ALERT] ${{ inputs.pipeline_name }} FAILED - ${{ inputs.repository_name }}"
+        html: |
+          <div style="padding:24px;background:#f4f7fb;font-family:Arial;">
+            <h2 style="color:#b91c1c;">Pipeline Failure</h2>
+            <p><b>Pipeline:</b> ${{ inputs.pipeline_name }}</p>
+            <p><b>Repository:</b> ${{ inputs.repository_name }}</p>
+            <p><b>Author:</b> ${{ inputs.author }}</p>
+            <p><b>Reason:</b> ${{ inputs.failure_reason }}</p>
+            <br/>
+            <a href="${{ inputs.report_url }}" style="padding:12px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;">View Report</a>
+            <br/><br/>
+            <a href="${{ inputs.workflow_url }}" style="padding:10px 14px;background:#111;color:#fff;text-decoration:none;border-radius:6px;">View Workflow</a>
+          </div>
+    - name: Post to Slack
+      uses: slackapi/slack-github-action@v3.0.1
+      with:
+        webhook: ${{ inputs.slack_webhook }}
+        webhook-type: incoming-webhook
+        payload: |
+          attachments:
+            - color: "#dc2626"
+              blocks:
+                - type: header
+                  text:
+                    type: plain_text
+                    text: "CI Pipeline Failure"
+                - type: section
+                  fields:
+                    - type: mrkdwn
+                      text: "*Pipeline*\n${{ inputs.pipeline_name }}"
+                    - type: mrkdwn
+                      text: "*Repository*\n${{ inputs.repository_name }}"
+                - type: section
+                  fields:
+                    - type: mrkdwn
+                      text: "*Author*\n${{ inputs.author }}"
+                    - type: mrkdwn
+                      text: "*Failure Reason*\n${{ inputs.failure_reason }}"
+                - type: actions
+                  elements:
+                    - type: button
+                      text:
+                        type: plain_text
+                        text: "View Report"
+                      url: "${{ inputs.report_url }}"
+                      style: danger
+                    - type: button
+                      text:
+                        type: plain_text
+                        text: "View Workflow"
+                      url: "${{ inputs.workflow_url }}"

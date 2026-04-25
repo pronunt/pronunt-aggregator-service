@@ -1,0 +1,84 @@
+name: Snyk Scan
+
+on:
+  workflow_call:
+    outputs:
+      snyk_status:
+        value: ${{ jobs.snyk.outputs.snyk_status }}
+      notify_tool:
+        value: ${{ jobs.snyk.outputs.notify_tool }}
+      notify_title:
+        value: ${{ jobs.snyk.outputs.notify_title }}
+      notify_summary:
+        value: ${{ jobs.snyk.outputs.notify_summary }}
+
+jobs:
+  snyk:
+    runs-on: ubuntu-latest
+    outputs:
+      snyk_status: ${{ steps.set.outputs.snyk_status }}
+      notify_tool: ${{ steps.set.outputs.notify_tool }}
+      notify_title: ${{ steps.set.outputs.notify_title }}
+      notify_summary: ${{ steps.set.outputs.notify_summary }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        if: ${{ hashFiles('requirements.txt') != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up Node.js
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install runtime dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install --prefer-binary -r requirements.txt
+          fi
+          if [ -f package.json ]; then
+            npm install
+          fi
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+      - name: Snyk Test
+        id: snyk
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+        run: |
+          if [ -f requirements.txt ]; then
+            snyk test --file=requirements.txt --severity-threshold=high
+          elif [ -f package.json ]; then
+            snyk test --file=package.json --severity-threshold=high
+          else
+            echo 'No supported manifest found for Snyk'
+          fi
+      - name: Snyk Monitor
+        if: ${{ steps.snyk.outcome == 'success' }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -f requirements.txt ]; then
+            snyk monitor --file=requirements.txt --project-name=${{ github.repository }}
+          elif [ -f package.json ]; then
+            snyk monitor --file=package.json --project-name=${{ github.repository }}
+          fi
+      - name: Set outputs
+        id: set
+        run: |
+          STATUS="${{ steps.snyk.outcome }}"
+          echo "snyk_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "notify_tool=snyk" >> $GITHUB_OUTPUT
+          if [ "$STATUS" = "failure" ]; then
+            echo "notify_title=Snyk Failed" >> $GITHUB_OUTPUT
+            echo "notify_summary=Security vulnerabilities detected (high severity)" >> $GITHUB_OUTPUT
+          else
+            echo "notify_title=Snyk Passed" >> $GITHUB_OUTPUT
+            echo "notify_summary=No high severity vulnerabilities" >> $GITHUB_OUTPUT
+          fi
+      - name: Fail if snyk failed
+        if: ${{ steps.snyk.outcome == 'failure' }}
+        run: exit 1

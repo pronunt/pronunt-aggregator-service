@@ -1,0 +1,93 @@
+name: Pronunt Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+concurrency:
+  group: pronunt-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  get-email:
+    runs-on: ubuntu-latest
+    outputs:
+      email: ${{ steps.author.outputs.email }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: author
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          EMAIL=$(git show -s --format='%ae' "$SHA" || echo "")
+          echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
+
+  branch-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch prefix
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          if [[ ! "$BRANCH" =~ ^(feat|fix|dev|test|chore|refactor|docs)/.+$ ]]; then
+            echo "Branch '$BRANCH' does not follow the short-lived branch convention"
+            exit 1
+          fi
+
+  sonar-scan:
+    needs: branch-policy
+    uses: ./.github/workflows/ci-sonar-check.yaml
+    secrets: inherit
+
+  snyk-scan:
+    needs: sonar-scan
+    if: ${{ needs.sonar-scan.outputs.quality_gate_status == 'PASSED' }}
+    uses: ./.github/workflows/ci-snyk-check.yaml
+    secrets: inherit
+
+  notify:
+    needs: [sonar-scan, snyk-scan, get-email]
+    if: ${{ always() && (needs.sonar-scan.outputs.quality_gate_status == 'FAILED' || needs.snyk-scan.outputs.snyk_status == 'failure') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sonar Notification
+        if: ${{ needs.sonar-scan.outputs.quality_gate_status == 'FAILED' }}
+        uses: ./.github/actions/notification-action
+        with:
+          pipeline_name: ${{ github.workflow }}
+          repository_name: ${{ github.repository }}
+          failure_reason: ${{ needs.sonar-scan.outputs.notify_summary }}
+          author: ${{ github.event.pull_request.user.login }}
+          smtp_username: ${{ secrets.SMTP_USERNAME }}
+          smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          mail_from: ${{ secrets.MAIL_FROM }}
+          mail_to: ${{ needs.get-email.outputs.email }}
+          slack_webhook: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
+          workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          report_url: ${{ secrets.SONAR_HOST_URL }}/dashboard?id=${{ secrets.SONAR_PROJECT_KEY }}
+
+      - name: Snyk Notification
+        if: ${{ needs.snyk-scan.outputs.snyk_status == 'failure' }}
+        uses: ./.github/actions/notification-action
+        with:
+          pipeline_name: ${{ github.workflow }}
+          repository_name: ${{ github.repository }}
+          failure_reason: ${{ needs.snyk-scan.outputs.notify_summary }}
+          author: ${{ github.event.pull_request.user.login }}
+          smtp_username: ${{ secrets.SMTP_USERNAME }}
+          smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          mail_from: ${{ secrets.MAIL_FROM }}
+          mail_to: ${{ needs.get-email.outputs.email }}
+          slack_webhook: ${{ secrets.SLACK_INCOMING_WEBHOOK }}
+          workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          report_url: https://app.snyk.io/org/${{ secrets.SNYK_ORG }}/projects/${{ secrets.SNYK_PROJECT_ID }}

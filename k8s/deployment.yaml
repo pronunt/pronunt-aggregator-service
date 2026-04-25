@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: pronunt-aggregator-service
-  namespace: prism
+  namespace: pronunt-app-ns
 spec:
   replicas: 1
   selector:
@@ -36,4 +36,5 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
+
 

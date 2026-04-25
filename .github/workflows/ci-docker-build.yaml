@@ -1,0 +1,105 @@
+name: Pronunt service Docker build workflow
+
+on:
+  workflow_call:
+    outputs:
+      image_tag:
+        value: ${{ jobs.build.outputs.image_tag }}
+      failure_stage:
+        value: ${{ jobs.build.outputs.failure_stage }}
+      report_url:
+        value: ${{ jobs.build.outputs.report_url }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      failure_stage: ${{ steps.failure.outputs.stage }}
+      report_url: ${{ steps.report.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: |
+          TAG=${GITHUB_SHA::7}
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - id: report
+        run: |
+          echo "url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: image
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/$OWNER/$REPO" >> $GITHUB_OUTPUT
+
+      - name: Build image
+        id: build
+        run: |
+          docker buildx build \
+            --load \
+            -t ${{ steps.image.outputs.image }}:${{ steps.meta.outputs.tag }} \
+            .
+
+      - name: Install Trivy
+        id: install_trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sudo sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Scan the image with Trivy
+        id: scan
+        continue-on-error: true
+        run: |
+          trivy image \
+            --vuln-type library \
+            --severity HIGH,CRITICAL \
+            --format sarif \
+            --output trivy-report.sarif \
+            --exit-code 1 \
+            ${{ steps.image.outputs.image }}:${{ steps.meta.outputs.tag }}
+
+      - name: Upload SARIF to GitHub Security
+        if: ${{ steps.scan.outcome != 'skipped' && always() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-report.sarif
+
+      - name: Stop on vulnerability
+        if: ${{ steps.scan.outcome == 'failure' }}
+        run: |
+          echo "Trivy scan failed. Blocking image push."
+          exit 1
+
+      - name: Push image
+        id: push
+        run: |
+          for i in 1 2 3; do
+            docker push ${{ steps.image.outputs.image }}:${{ steps.meta.outputs.tag }} && break || sleep 5
+          done
+
+      - id: failure
+        if: always()
+        run: |
+          if [ "${{ steps.build.outcome }}" = "failure" ]; then
+            echo "stage=build_failed" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.scan.outcome }}" = "failure" ]; then
+            echo "stage=trivy_scan_failed" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.push.outcome }}" = "failure" ]; then
+            echo "stage=push_failed" >> $GITHUB_OUTPUT
+          else
+            echo "stage=success" >> $GITHUB_OUTPUT
+          fi

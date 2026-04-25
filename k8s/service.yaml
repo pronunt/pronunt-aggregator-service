@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: pronunt-aggregator-service
-  namespace: prism
+  namespace: pronunt-app-ns
 spec:
   selector:
     app: pronunt-aggregator-service
@@ -11,4 +11,5 @@ spec:
       port: 8000
       targetPort: 8000
   type: ClusterIP
+
 
