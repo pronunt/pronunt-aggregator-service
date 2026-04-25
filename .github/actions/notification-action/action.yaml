@@ -3,26 +3,37 @@ description: Send email and Slack notification
 
 inputs:
   pipeline_name:
+    description: Name of the workflow or pipeline that triggered the notification.
     required: true
   repository_name:
+    description: Repository name associated with the failing workflow run.
     required: true
   failure_reason:
+    description: Human-readable reason for the failure shown in email and Slack.
     required: true
   author:
+    description: Pull request author or commit author associated with the run.
     required: true
   smtp_username:
+    description: SMTP username used to send email notifications.
     required: true
   smtp_password:
+    description: SMTP password or app password used to send email notifications.
     required: true
   mail_from:
+    description: Sender email address used in notification emails.
     required: true
   mail_to:
+    description: Recipient email address for the notification.
     required: true
   slack_webhook:
+    description: Incoming Slack webhook URL for posting failure alerts.
     required: true
   workflow_url:
+    description: Direct URL to the GitHub Actions workflow run.
     required: true
   report_url:
+    description: Direct URL to the relevant failure report or security dashboard.
     required: true
 
 runs:

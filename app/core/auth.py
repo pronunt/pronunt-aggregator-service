@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Annotated
 
 import jwt
 from fastapi import Depends, Request, status
@@ -7,6 +8,9 @@ from jwt import InvalidTokenError, PyJWKClient
 from app.core.exceptions import AppException
 from app.core.request_context import get_request_id
 from app.core.settings import Settings, get_settings
+
+
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
 
 
 @dataclass
@@ -50,7 +54,7 @@ def _validate_jwt(token: str, settings: Settings) -> dict:
     )
 
 
-def get_auth_context(request: Request, settings: Settings = Depends(get_settings)) -> AuthContext:
+def get_auth_context(request: Request, settings: SettingsDependency) -> AuthContext:
     token = _extract_bearer_token(request)
 
     if not settings.auth_enabled:
@@ -95,7 +99,9 @@ def get_auth_context(request: Request, settings: Settings = Depends(get_settings
 
 
 def require_roles(*required_roles: str):
-    def dependency(context: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    auth_context_dependency = Annotated[AuthContext, Depends(get_auth_context)]
+
+    def dependency(context: auth_context_dependency) -> AuthContext:
         if required_roles and not any(role in context.roles for role in required_roles):
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,

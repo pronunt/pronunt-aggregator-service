@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Protocol
+from typing import Annotated, Protocol
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -32,6 +32,8 @@ from app.schemas.pull_request import (
     ServiceCriticality,
     SortDirection,
 )
+
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
 
 OPEN_PULL_REQUEST_STATE = "open"
 PULL_REQUEST_NOT_FOUND_CODE = "pull_request_not_found"
@@ -495,19 +497,19 @@ def get_pull_request_repository() -> PullRequestRepository:
     return MongoPullRequestRepository(get_pull_request_collection())
 
 
-def get_config_resolver(settings: Settings = Depends(get_settings)) -> ConfigResolver:
+def get_config_resolver(settings: SettingsDependency) -> ConfigResolver:
     return HttpConfigResolver(settings)
 
 
-def get_ai_summary_resolver(settings: Settings = Depends(get_settings)) -> AiSummaryResolver:
+def get_ai_summary_resolver(settings: SettingsDependency) -> AiSummaryResolver:
     return HttpAiSummaryResolver(settings)
 
 
 def get_aggregator_service(
-    repository: PullRequestRepository = Depends(get_pull_request_repository),
-    settings: Settings = Depends(get_settings),
-    config_resolver: ConfigResolver = Depends(get_config_resolver),
-    ai_summary_resolver: AiSummaryResolver = Depends(get_ai_summary_resolver),
+    repository: Annotated[PullRequestRepository, Depends(get_pull_request_repository)],
+    settings: SettingsDependency,
+    config_resolver: Annotated[ConfigResolver, Depends(get_config_resolver)],
+    ai_summary_resolver: Annotated[AiSummaryResolver, Depends(get_ai_summary_resolver)],
 ) -> AggregatorService:
     return AggregatorService(
         repository=repository,
