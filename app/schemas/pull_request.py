@@ -118,6 +118,14 @@ class AggregatorSummaryResponse(BaseModel):
     by_criticality: dict[str, int]
 
 
+class PullRequestSummaryResponse(BaseModel):
+    id: str
+    pr_uid: str
+    ai_summary: str
+    generated_by: str
+    model: str
+
+
 class PullRequestFilters(BaseModel):
     repository_full_name: str | None = None
     author_username: str | None = None

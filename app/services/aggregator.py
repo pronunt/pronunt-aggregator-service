@@ -17,6 +17,7 @@ from app.core.exceptions import AppException
 from app.core.http import service_request
 from app.core.settings import Settings, get_settings
 from app.models.pull_request import build_pull_request_document
+from app.schemas.ai import AiSummaryRequest, AiSummaryResponse
 from app.schemas.config import ConfigImpactResponse, ConfigServiceResponse
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
@@ -25,6 +26,7 @@ from app.schemas.pull_request import (
     PullRequestResponse,
     PullRequestSortField,
     PullRequestUpsertRequest,
+    PullRequestSummaryResponse,
     ReviewStatus,
     ServiceCriticality,
     SortDirection,
@@ -117,6 +119,8 @@ class PullRequestRepository(Protocol):
 
     def recompute_scores(self, pr_id: str, scorecard: Scorecard) -> dict | None: ...
 
+    def update_ai_summary(self, pr_id: str, summary: str) -> dict | None: ...
+
     def summary(self) -> AggregatorSummaryResponse: ...
 
 
@@ -127,6 +131,15 @@ class ConfigResolver(Protocol):
         request: Request,
         auth_context: AuthContext,
     ) -> ResolvedPullRequestMetadata: ...
+
+
+class AiSummaryResolver(Protocol):
+    async def summarize_pull_request(
+        self,
+        pull_request: PullRequestResponse,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> AiSummaryResponse: ...
 
 
 class MongoPullRequestRepository:
@@ -198,6 +211,18 @@ class MongoPullRequestRepository:
         self.collection.update_one({"_id": object_id}, update)
         return self.collection.find_one({"_id": object_id})
 
+    def update_ai_summary(self, pr_id: str, summary: str) -> dict | None:
+        try:
+            object_id = ObjectId(pr_id)
+        except InvalidId:
+            return None
+
+        self.collection.update_one(
+            {"_id": object_id},
+            {"$set": {"ai_summary": summary, "synced_at": _utc_now()}},
+        )
+        return self.collection.find_one({"_id": object_id})
+
     def summary(self) -> AggregatorSummaryResponse:
         return AggregatorSummaryResponse(
             total_open=self.collection.count_documents({"state": OPEN_PULL_REQUEST_STATE}),
@@ -214,10 +239,17 @@ class MongoPullRequestRepository:
 
 
 class AggregatorService:
-    def __init__(self, repository: PullRequestRepository, settings: Settings, config_resolver: ConfigResolver) -> None:
+    def __init__(
+        self,
+        repository: PullRequestRepository,
+        settings: Settings,
+        config_resolver: ConfigResolver,
+        ai_summary_resolver: AiSummaryResolver,
+    ) -> None:
         self.repository = repository
         self.settings = settings
         self.config_resolver = config_resolver
+        self.ai_summary_resolver = ai_summary_resolver
 
     async def upsert_pull_request(
         self,
@@ -266,6 +298,30 @@ class AggregatorService:
 
     def get_summary(self) -> AggregatorSummaryResponse:
         return self.repository.summary()
+
+    async def generate_pull_request_summary(
+        self,
+        pr_id: str,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> PullRequestSummaryResponse:
+        current = self.repository.get_by_id(pr_id)
+        if not current:
+            self._raise_not_found(pr_id)
+
+        pull_request = self._to_response(current)
+        ai_summary = await self.ai_summary_resolver.summarize_pull_request(pull_request, request, auth_context)
+        updated = self.repository.update_ai_summary(pr_id, ai_summary.summary)
+        if not updated:
+            self._raise_not_found(pr_id)
+
+        return PullRequestSummaryResponse(
+            id=str(updated["_id"]),
+            pr_uid=updated["pr_uid"],
+            ai_summary=ai_summary.summary,
+            generated_by=ai_summary.generated_by,
+            model=ai_summary.model,
+        )
 
     def _build_scorecard(self, payload: PullRequestUpsertRequest) -> Scorecard:
         stale_hours = _hours_since(payload.updated_at)
@@ -373,6 +429,41 @@ class HttpConfigResolver:
         )
 
 
+class HttpAiSummaryResolver:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def summarize_pull_request(
+        self,
+        pull_request: PullRequestResponse,
+        request: Request,
+        auth_context: AuthContext,
+    ) -> AiSummaryResponse:
+        response = await service_request(
+            "POST",
+            f"{self.settings.ai_service_url}/api/v1/ai/summaries/pr",
+            request=request,
+            auth_context=auth_context,
+            json=AiSummaryRequest(
+                repository_full_name=pull_request.repository_full_name,
+                number=pull_request.number,
+                title=pull_request.title,
+                author_username=pull_request.author_username,
+                review_status=pull_request.review_status.value,
+                criticality=pull_request.criticality.value,
+                changed_files=pull_request.changed_files,
+                additions=pull_request.additions,
+                deletions=pull_request.deletions,
+                risk_score=pull_request.risk_score,
+                priority_score=pull_request.priority_score,
+                stale=pull_request.stale,
+                impact_services=pull_request.impact_services,
+                labels=pull_request.labels,
+            ).model_dump(mode="json"),
+        )
+        return AiSummaryResponse.model_validate(response.json())
+
+
 @lru_cache(maxsize=1)
 def get_pull_request_repository() -> PullRequestRepository:
     return MongoPullRequestRepository(get_pull_request_collection())
@@ -382,9 +473,19 @@ def get_config_resolver(settings: Settings = Depends(get_settings)) -> ConfigRes
     return HttpConfigResolver(settings)
 
 
+def get_ai_summary_resolver(settings: Settings = Depends(get_settings)) -> AiSummaryResolver:
+    return HttpAiSummaryResolver(settings)
+
+
 def get_aggregator_service(
     repository: PullRequestRepository = Depends(get_pull_request_repository),
     settings: Settings = Depends(get_settings),
     config_resolver: ConfigResolver = Depends(get_config_resolver),
+    ai_summary_resolver: AiSummaryResolver = Depends(get_ai_summary_resolver),
 ) -> AggregatorService:
-    return AggregatorService(repository=repository, settings=settings, config_resolver=config_resolver)
+    return AggregatorService(
+        repository=repository,
+        settings=settings,
+        config_resolver=config_resolver,
+        ai_summary_resolver=ai_summary_resolver,
+    )

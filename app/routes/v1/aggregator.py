@@ -9,6 +9,7 @@ from app.schemas.pull_request import (
     PullRequestListResponse,
     PullRequestResponse,
     PullRequestSortField,
+    PullRequestSummaryResponse,
     PullRequestState,
     PullRequestUpsertRequest,
     ReviewStatus,
@@ -84,6 +85,16 @@ async def recompute_pull_request_scores(
     service: AggregatorServiceDependency,
 ) -> PullRequestResponse:
     return await service.recompute_pull_request_scores(pr_id, request, auth_context)
+
+
+@router.post("/prs/{pr_id}/summary")
+async def generate_pull_request_summary(
+    pr_id: str,
+    request: Request,
+    auth_context: AggregatorAccessDependency,
+    service: AggregatorServiceDependency,
+) -> PullRequestSummaryResponse:
+    return await service.generate_pull_request_summary(pr_id, request, auth_context)
 
 
 @router.get("/summary")

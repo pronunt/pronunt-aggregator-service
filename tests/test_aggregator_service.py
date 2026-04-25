@@ -69,6 +69,14 @@ class FakePullRequestRepository:
         )
         return document
 
+    def update_ai_summary(self, pr_id: str, summary: str) -> dict | None:
+        document = self.documents.get(pr_id)
+        if not document:
+            return None
+        document["ai_summary"] = summary
+        document["synced_at"] = datetime.now(UTC)
+        return document
+
     def summary(self) -> AggregatorSummaryResponse:
         items = list(self.documents.values())
         return AggregatorSummaryResponse(
@@ -94,6 +102,17 @@ class FakeConfigResolver:
         return ResolvedPullRequestMetadata(
             criticality=self.criticality,
             impact_services=self.impact_services,
+        )
+
+
+class FakeAiSummaryResolver:
+    async def summarize_pull_request(self, pull_request, request, auth_context):
+        from app.schemas.ai import AiSummaryResponse
+
+        return AiSummaryResponse(
+            summary=f"Summary for {pull_request.pr_uid}",
+            generated_by="fake",
+            model="test-model",
         )
 
 
@@ -132,6 +151,7 @@ def test_upsert_assigns_scores_and_persists_document() -> None:
         FakePullRequestRepository(),
         Settings(_env_file=None, allow_unsafe_dev_auth=True),
         FakeConfigResolver(),
+        FakeAiSummaryResolver(),
     )
     request = Request({"type": "http", "headers": [], "state": {}})
     auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
@@ -149,6 +169,7 @@ def test_stale_pull_request_gets_marked_and_prioritized() -> None:
         FakePullRequestRepository(),
         Settings(_env_file=None, allow_unsafe_dev_auth=True, aggregator_stale_after_hours=48),
         FakeConfigResolver(criticality=ServiceCriticality.critical),
+        FakeAiSummaryResolver(),
     )
     request = Request({"type": "http", "headers": [], "state": {}})
     auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
@@ -166,6 +187,7 @@ def test_list_and_summary_reflect_persisted_pull_requests() -> None:
         repository,
         Settings(_env_file=None, allow_unsafe_dev_auth=True),
         FakeConfigResolver(),
+        FakeAiSummaryResolver(),
     )
     request = Request({"type": "http", "headers": [], "state": {}})
     auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
@@ -188,6 +210,7 @@ def test_config_metadata_overrides_incoming_payload_values() -> None:
             criticality=ServiceCriticality.critical,
             impact_services=["pronunt-worker-service", "pronunt-frontend-service"],
         ),
+        FakeAiSummaryResolver(),
     )
     request = Request({"type": "http", "headers": [], "state": {}})
     auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
@@ -197,3 +220,23 @@ def test_config_metadata_overrides_incoming_payload_values() -> None:
 
     assert response.criticality == ServiceCriticality.critical
     assert response.impact_services == ["pronunt-frontend-service", "pronunt-worker-service"]
+
+
+def test_generate_pull_request_summary_persists_summary() -> None:
+    repository = FakePullRequestRepository()
+    service = AggregatorService(
+        repository,
+        Settings(_env_file=None, allow_unsafe_dev_auth=True),
+        FakeConfigResolver(),
+        FakeAiSummaryResolver(),
+    )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
+    created = asyncio.run(service.upsert_pull_request(_build_payload(number=5, hours_ago=4), request, auth_context))
+
+    summary = asyncio.run(service.generate_pull_request_summary(created.id, request, auth_context))
+    stored = service.get_pull_request(created.id)
+
+    assert summary.generated_by == "fake"
+    assert "Summary for" in summary.ai_summary
+    assert stored.ai_summary == summary.ai_summary
