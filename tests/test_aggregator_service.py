@@ -8,6 +8,7 @@ from app.core.auth import AuthContext
 from app.core.settings import Settings
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
+    ImpactDetail,
     PullRequestFilters,
     PullRequestSortField,
     PullRequestUpsertRequest,
@@ -102,6 +103,16 @@ class FakeConfigResolver:
         return ResolvedPullRequestMetadata(
             criticality=self.criticality,
             impact_services=self.impact_services,
+            impact_summary="Impact summary for test payload.",
+            impact_details=[
+                ImpactDetail(
+                    service_name=service_name,
+                    relationship="downstream",
+                    path=["pronunt-aggregator-service", service_name],
+                    explanation=f"{service_name} is impacted in the test graph.",
+                )
+                for service_name in self.impact_services
+            ],
         )
 
 
@@ -220,6 +231,8 @@ def test_config_metadata_overrides_incoming_payload_values() -> None:
 
     assert response.criticality == ServiceCriticality.critical
     assert response.impact_services == ["pronunt-frontend-service", "pronunt-worker-service"]
+    assert response.impact_summary == "Impact summary for test payload."
+    assert len(response.impact_details) == 2
 
 
 def test_generate_pull_request_summary_persists_summary() -> None:

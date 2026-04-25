@@ -18,3 +18,12 @@ class ConfigImpactResponse(BaseModel):
     service_name: str
     direct_dependencies: list[str]
     downstream_services: list[str]
+    impact_summary: str
+    impact_details: list["ConfigImpactDetailResponse"]
+
+
+class ConfigImpactDetailResponse(BaseModel):
+    service_name: str
+    relationship: str
+    path: list[str]
+    explanation: str

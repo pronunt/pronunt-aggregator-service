@@ -21,6 +21,7 @@ from app.schemas.ai import AiSummaryRequest, AiSummaryResponse
 from app.schemas.config import ConfigImpactResponse, ConfigServiceResponse
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
+    ImpactDetail,
     PullRequestFilters,
     PullRequestListResponse,
     PullRequestResponse,
@@ -108,6 +109,8 @@ class Scorecard:
 class ResolvedPullRequestMetadata:
     criticality: ServiceCriticality
     impact_services: list[str]
+    impact_summary: str
+    impact_details: list[ImpactDetail]
 
 
 class PullRequestRepository(Protocol):
@@ -358,6 +361,8 @@ class AggregatorService:
     def _to_response(self, document: dict) -> PullRequestResponse:
         response_data = dict(document)
         response_data["id"] = str(response_data.pop("_id"))
+        response_data.setdefault("impact_summary", "")
+        response_data.setdefault("impact_details", [])
         return PullRequestResponse.model_validate(response_data)
 
     async def _build_resolved_payload(
@@ -370,6 +375,8 @@ class AggregatorService:
         return payload.model_with_resolved_metadata(
             criticality=metadata.criticality,
             impact_services=metadata.impact_services,
+            impact_summary=metadata.impact_summary,
+            impact_details=metadata.impact_details,
         )
 
     def _build_payload_from_document(self, document: dict) -> PullRequestUpsertRequest:
@@ -426,6 +433,16 @@ class HttpConfigResolver:
         return ResolvedPullRequestMetadata(
             criticality=service_config.criticality,
             impact_services=impact_services,
+            impact_summary=impact.impact_summary,
+            impact_details=[
+                ImpactDetail(
+                    service_name=detail.service_name,
+                    relationship=detail.relationship,
+                    path=detail.path,
+                    explanation=detail.explanation,
+                )
+                for detail in impact.impact_details
+            ],
         )
 
 

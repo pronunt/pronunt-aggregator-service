@@ -24,6 +24,13 @@ class ServiceCriticality(str, Enum):
     critical = "critical"
 
 
+class ImpactDetail(BaseModel):
+    service_name: str
+    relationship: str
+    path: list[str]
+    explanation: str
+
+
 class PullRequestUpsertRequest(BaseModel):
     repository_full_name: str = Field(..., examples=["pronunt/pronunt-aggregator-service"])
     repository_owner: str
@@ -47,6 +54,8 @@ class PullRequestUpsertRequest(BaseModel):
     merged_at: datetime | None = None
     closed_at: datetime | None = None
     impact_services: list[str] = Field(default_factory=list)
+    impact_summary: str = ""
+    impact_details: list[ImpactDetail] = Field(default_factory=list)
     ai_summary: str | None = None
 
     def model_with_resolved_metadata(
@@ -54,10 +63,14 @@ class PullRequestUpsertRequest(BaseModel):
         *,
         criticality: ServiceCriticality,
         impact_services: list[str],
+        impact_summary: str,
+        impact_details: list[ImpactDetail],
     ) -> "PullRequestUpsertRequest":
         payload = self.model_dump()
         payload["criticality"] = criticality
         payload["impact_services"] = impact_services
+        payload["impact_summary"] = impact_summary
+        payload["impact_details"] = impact_details
         return PullRequestUpsertRequest(**payload)
 
 
@@ -100,6 +113,8 @@ class PullRequestResponse(BaseModel):
     stale: bool
     stale_hours: int
     impact_services: list[str]
+    impact_summary: str
+    impact_details: list[ImpactDetail]
     score_breakdown: ScoreBreakdown
     synced_at: datetime
     last_scored_at: datetime

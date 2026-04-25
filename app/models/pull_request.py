@@ -47,6 +47,8 @@ def build_pull_request_document(payload: PullRequestUpsertRequest, scorecard: Sc
         "stale": scorecard.stale,
         "stale_hours": scorecard.stale_hours,
         "impact_services": scorecard.impact_services,
+        "impact_summary": payload.impact_summary,
+        "impact_details": [detail.model_dump() for detail in payload.impact_details],
         "score_breakdown": scorecard.score_breakdown,
         "synced_at": now,
         "last_scored_at": now,
