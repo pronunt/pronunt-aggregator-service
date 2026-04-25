@@ -1,4 +1,13 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class AiProviderOverride(BaseModel):
+    provider: Literal["inhouse", "openai", "fallback"]
+    model: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
 
 
 class AiSummaryRequest(BaseModel):
@@ -16,9 +25,14 @@ class AiSummaryRequest(BaseModel):
     stale: bool
     impact_services: list[str]
     labels: list[str]
+    provider_override: AiProviderOverride | None = None
 
 
 class AiSummaryResponse(BaseModel):
     summary: str
     generated_by: str
     model: str
+
+
+class PullRequestSummaryGenerateRequest(BaseModel):
+    provider_override: AiProviderOverride | None = None

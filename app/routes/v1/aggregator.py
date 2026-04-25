@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.core.auth import AuthContext, require_roles
+from app.schemas.ai import PullRequestSummaryGenerateRequest
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
     PullRequestFilters,
@@ -93,8 +94,10 @@ async def generate_pull_request_summary(
     request: Request,
     auth_context: AggregatorAccessDependency,
     service: AggregatorServiceDependency,
+    payload: PullRequestSummaryGenerateRequest | None = None,
 ) -> PullRequestSummaryResponse:
-    return await service.generate_pull_request_summary(pr_id, request, auth_context)
+    provider_override = payload.provider_override if payload is not None else None
+    return await service.generate_pull_request_summary(pr_id, request, auth_context, provider_override=provider_override)
 
 
 @router.get("/summary")

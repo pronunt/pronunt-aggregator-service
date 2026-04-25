@@ -16,6 +16,7 @@ from app.schemas.pull_request import (
     ServiceCriticality,
     SortDirection,
 )
+from app.schemas.ai import AiProviderOverride
 from app.services.aggregator import AggregatorService, ResolvedPullRequestMetadata, Scorecard
 
 
@@ -117,13 +118,14 @@ class FakeConfigResolver:
 
 
 class FakeAiSummaryResolver:
-    async def summarize_pull_request(self, pull_request, request, auth_context):
+    async def summarize_pull_request(self, pull_request, request, auth_context, provider_override=None):
         from app.schemas.ai import AiSummaryResponse
 
+        model = provider_override.model if provider_override is not None and provider_override.model else "test-model"
         return AiSummaryResponse(
             summary=f"Summary for {pull_request.pr_uid}",
             generated_by="fake",
-            model="test-model",
+            model=model,
         )
 
 
@@ -253,3 +255,27 @@ def test_generate_pull_request_summary_persists_summary() -> None:
     assert summary.generated_by == "fake"
     assert "Summary for" in summary.ai_summary
     assert stored.ai_summary == summary.ai_summary
+
+
+def test_generate_pull_request_summary_accepts_provider_override() -> None:
+    repository = FakePullRequestRepository()
+    service = AggregatorService(
+        repository,
+        Settings(_env_file=None, allow_unsafe_dev_auth=True),
+        FakeConfigResolver(),
+        FakeAiSummaryResolver(),
+    )
+    request = Request({"type": "http", "headers": [], "state": {}})
+    auth_context = AuthContext(subject="dev-user", username="dev-user", roles=["developer"], token="token")
+    created = asyncio.run(service.upsert_pull_request(_build_payload(number=6, hours_ago=2), request, auth_context))
+
+    summary = asyncio.run(
+        service.generate_pull_request_summary(
+            created.id,
+            request,
+            auth_context,
+            provider_override=AiProviderOverride(provider="openai", model="gpt-4.1-mini"),
+        )
+    )
+
+    assert summary.model == "gpt-4.1-mini"

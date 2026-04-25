@@ -17,7 +17,7 @@ from app.core.exceptions import AppException
 from app.core.http import service_request
 from app.core.settings import Settings, get_settings
 from app.models.pull_request import build_pull_request_document
-from app.schemas.ai import AiSummaryRequest, AiSummaryResponse
+from app.schemas.ai import AiProviderOverride, AiSummaryRequest, AiSummaryResponse
 from app.schemas.config import ConfigImpactResponse, ConfigServiceResponse
 from app.schemas.pull_request import (
     AggregatorSummaryResponse,
@@ -142,6 +142,7 @@ class AiSummaryResolver(Protocol):
         pull_request: PullRequestResponse,
         request: Request,
         auth_context: AuthContext,
+        provider_override: AiProviderOverride | None = None,
     ) -> AiSummaryResponse: ...
 
 
@@ -307,13 +308,19 @@ class AggregatorService:
         pr_id: str,
         request: Request,
         auth_context: AuthContext,
+        provider_override: AiProviderOverride | None = None,
     ) -> PullRequestSummaryResponse:
         current = self.repository.get_by_id(pr_id)
         if not current:
             self._raise_not_found(pr_id)
 
         pull_request = self._to_response(current)
-        ai_summary = await self.ai_summary_resolver.summarize_pull_request(pull_request, request, auth_context)
+        ai_summary = await self.ai_summary_resolver.summarize_pull_request(
+            pull_request,
+            request,
+            auth_context,
+            provider_override=provider_override,
+        )
         updated = self.repository.update_ai_summary(pr_id, ai_summary.summary)
         if not updated:
             self._raise_not_found(pr_id)
@@ -455,6 +462,7 @@ class HttpAiSummaryResolver:
         pull_request: PullRequestResponse,
         request: Request,
         auth_context: AuthContext,
+        provider_override: AiProviderOverride | None = None,
     ) -> AiSummaryResponse:
         response = await service_request(
             "POST",
@@ -476,6 +484,7 @@ class HttpAiSummaryResolver:
                 stale=pull_request.stale,
                 impact_services=pull_request.impact_services,
                 labels=pull_request.labels,
+                provider_override=provider_override,
             ).model_dump(mode="json"),
         )
         return AiSummaryResponse.model_validate(response.json())
