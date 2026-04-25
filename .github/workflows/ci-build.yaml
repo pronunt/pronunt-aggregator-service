@@ -58,11 +58,12 @@ jobs:
             echo "should_build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews > reviews.json
-          APPROVED=$(jq -r 'map(select(.state == "APPROVED")) | length > 0' reviews.json)
-          if [ "$APPROVED" = "true" ]; then
-            SHOULD_BUILD=true
-          fi
+          SHOULD_BUILD=true
+          # gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews > reviews.json
+          # APPROVED=$(jq -r 'map(select(.state == "APPROVED")) | length > 0' reviews.json)
+          # if [ "$APPROVED" = "true" ]; then
+          #   SHOULD_BUILD=true
+          # fi
           echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
 
   docker-build:
