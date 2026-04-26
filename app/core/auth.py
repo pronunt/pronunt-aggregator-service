@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated
 
+import httpx
 import jwt
 from fastapi import Depends, Request, status
 from jwt import InvalidTokenError, PyJWKClient
@@ -54,6 +55,49 @@ def _validate_jwt(token: str, settings: Settings) -> dict:
     )
 
 
+def _validate_pronunt_session(token: str, settings: Settings) -> AuthContext | None:
+    if not settings.auth_service_url or not settings.internal_service_token:
+        return None
+
+    try:
+        with httpx.Client(timeout=settings.http_timeout_seconds) as client:
+            response = client.get(
+                f"{settings.auth_service_url}/api/v1/auth/internal/session",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-Internal-Service-Token": settings.internal_service_token,
+                    "Accept": "application/json",
+                },
+            )
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            raise AppException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                code="invalid_access_token",
+                message="Access token validation failed.",
+            ) from exc
+        raise AppException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="auth_service_unavailable",
+            message="Auth service session validation failed.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise AppException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="auth_service_unavailable",
+            message="Auth service session validation failed.",
+        ) from exc
+
+    payload = response.json()
+    return AuthContext(
+        subject=payload.get("subject", payload.get("session_id", "unknown")),
+        username=payload.get("username", "unknown"),
+        roles=payload.get("roles", []),
+        token=token,
+    )
+
+
 def get_auth_context(request: Request, settings: SettingsDependency) -> AuthContext:
     token = _extract_bearer_token(request)
 
@@ -62,6 +106,11 @@ def get_auth_context(request: Request, settings: SettingsDependency) -> AuthCont
             username = request.headers.get("X-Debug-User", "dev-user")
             roles = [role for role in request.headers.get("X-Debug-Roles", "developer").split(",") if role]
             return AuthContext(subject=username, username=username, roles=roles, token=token)
+
+        if token:
+            session_context = _validate_pronunt_session(token, settings)
+            if session_context:
+                return session_context
 
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
