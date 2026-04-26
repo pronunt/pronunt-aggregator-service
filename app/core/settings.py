@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     aggregator_stale_after_hours: int = 72
     config_service_url: str = "http://pronunt-config-service:8000"
     ai_service_url: str = "http://pronunt-ai-service:8000"
+    auth_service_url: str = "http://pronunt-auth-service:8000"
+    internal_service_token: str | None = None
 
     auth_enabled: bool = False
     allow_unsafe_dev_auth: bool = True
@@ -47,6 +49,8 @@ class Settings(BaseSettings):
             errors.append("CONFIG_SERVICE_URL is required.")
         if not self.ai_service_url:
             errors.append("AI_SERVICE_URL is required.")
+        if not self.auth_service_url:
+            errors.append("AUTH_SERVICE_URL is required.")
 
         if self.auth_enabled:
             if not self.keycloak_issuer:
