@@ -84,30 +84,33 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           VALUES_FILE_INPUT: ${{ inputs.values_file }}
           IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
+          PR_TITLE_INPUT: ${{ inputs.pr_title }}
+          PR_BODY_INPUT: ${{ inputs.pr_body }}
+          RELEASE_BRANCH_PREFIX_INPUT: ${{ inputs.release_branch_prefix }}
         run: |
           set -euo pipefail
-          repo_name="${{ github.event.repository.name }}"
-          image_tag_slug="$(echo "${{ inputs.image_tag }}" | tr '/:@ ' '----')"
-          branch_name="${{ inputs.release_branch_prefix }}/${repo_name}/${image_tag_slug}"
+          repo_name="${GITHUB_REPOSITORY##*/}"
+          image_tag_slug="$(echo "${IMAGE_TAG_INPUT}" | tr '/:@ ' '----')"
+          branch_name="${RELEASE_BRANCH_PREFIX_INPUT}/${repo_name}/${image_tag_slug}"
 
-          if [[ -n "${{ inputs.pr_title }}" ]]; then
-            pr_title="${{ inputs.pr_title }}"
+          if [[ -n "${PR_TITLE_INPUT}" ]]; then
+            pr_title="${PR_TITLE_INPUT}"
           else
-            pr_title="release(${repo_name}): promote image to ${{ inputs.image_tag }}"
+            pr_title="release(${repo_name}): promote image to ${IMAGE_TAG_INPUT}"
           fi
 
-          if [[ -n "${{ inputs.pr_body }}" ]]; then
-            pr_body="${{ inputs.pr_body }}"
+          if [[ -n "${PR_BODY_INPUT}" ]]; then
+            pr_body="${PR_BODY_INPUT}"
           else
             source_release="${RELEASE_TAG:-manual}"
-            pr_body="$(printf 'This PR updates `%s` for the released image.\n\n- Service: `%s`\n- Image tag: `%s`\n- Source release: `%s`\n' "$VALUES_FILE_INPUT" "$repo_name" "$IMAGE_TAG_INPUT" "$source_release")"
+            printf -v pr_body 'This PR updates `%s` for the released image.\n\n- Service: `%s`\n- Image tag: `%s`\n- Source release: `%s`\n' "${VALUES_FILE_INPUT}" "${repo_name}" "${IMAGE_TAG_INPUT}" "${source_release}"
           fi
 
-          echo "branch_name=${branch_name}" >> "$GITHUB_OUTPUT"
-          echo "pr_title=${pr_title}" >> "$GITHUB_OUTPUT"
           {
+            echo "branch_name=${branch_name}"
+            echo "pr_title=${pr_title}"
             echo "pr_body<<EOF"
-            printf '%s\n' "$pr_body"
+            printf '%s\n' "${pr_body}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
