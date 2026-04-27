@@ -92,12 +92,12 @@ jobs:
             pr_body="${{ inputs.pr_body }}"
           else
             cat > pr_body.txt <<EOF
-This PR updates \`${{ inputs.values_file }}\` for the released image.
+            This PR updates \`${{ inputs.values_file }}\` for the released image.
 
-- Service: \`${repo_name}\`
-- Image tag: \`${{ inputs.image_tag }}\`
-- Source release: \`${{ github.event.release.tag_name }}\`
-EOF
+            - Service: \`${repo_name}\`
+            - Image tag: \`${{ inputs.image_tag }}\`
+            - Source release: \`${{ github.event.release.tag_name }}\`
+            EOF
             pr_body="$(cat pr_body.txt)"
           fi
 
