@@ -16,6 +16,10 @@ on:
       image_tag:
         required: true
         type: string
+      release_tag:
+        required: false
+        default: ""
+        type: string
       yaml_path:
         required: false
         default: .image.tag
@@ -76,6 +80,10 @@ jobs:
         id: meta
         working-directory: helm-repo
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          VALUES_FILE_INPUT: ${{ inputs.values_file }}
+          IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
           repo_name="${{ github.event.repository.name }}"
@@ -91,14 +99,8 @@ jobs:
           if [[ -n "${{ inputs.pr_body }}" ]]; then
             pr_body="${{ inputs.pr_body }}"
           else
-            cat > pr_body.txt <<EOF
-            This PR updates \`${{ inputs.values_file }}\` for the released image.
-
-            - Service: \`${repo_name}\`
-            - Image tag: \`${{ inputs.image_tag }}\`
-            - Source release: \`${{ github.event.release.tag_name }}\`
-            EOF
-            pr_body="$(cat pr_body.txt)"
+            source_release="${RELEASE_TAG:-manual}"
+            pr_body="$(printf 'This PR updates `%s` for the released image.\n\n- Service: `%s`\n- Image tag: `%s`\n- Source release: `%s`\n' "$VALUES_FILE_INPUT" "$repo_name" "$IMAGE_TAG_INPUT" "$source_release")"
           fi
 
           echo "branch_name=${branch_name}" >> "$GITHUB_OUTPUT"
