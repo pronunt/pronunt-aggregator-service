@@ -60,14 +60,15 @@ jobs:
 
   update-helm-prod-values:
     needs: promote
-    uses: ./.github/workflows/cd-helm-test.yaml
+    uses: ./.github/workflows/cd-helm-prod.yaml
     with:
       helm_repo: pronunt/pronunt-helm-charts
-      helm_branch: prod
+      helm_base_branch: prod
       values_file: apps/${{ github.event.repository.name }}/values-prod.yaml
       image_tag: ${{ needs.promote.outputs.version }}
       yaml_path: .image.tag
       commit_message: "release(${{ github.event.repository.name }}): promote image to ${{ needs.promote.outputs.version }}"
+      release_branch_prefix: release
     secrets:
       HELM_REPO_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
 

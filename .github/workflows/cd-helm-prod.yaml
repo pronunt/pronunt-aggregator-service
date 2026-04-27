@@ -1,0 +1,156 @@
+name: Create Helm Prod PR
+
+on:
+  workflow_call:
+    inputs:
+      helm_repo:
+        required: true
+        type: string
+      helm_base_branch:
+        required: false
+        default: prod
+        type: string
+      values_file:
+        required: true
+        type: string
+      image_tag:
+        required: true
+        type: string
+      yaml_path:
+        required: false
+        default: .image.tag
+        type: string
+      commit_message:
+        required: false
+        default: "release: update prod image tag"
+        type: string
+      release_branch_prefix:
+        required: false
+        default: release
+        type: string
+      pr_title:
+        required: false
+        default: ""
+        type: string
+      pr_body:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      HELM_REPO_TOKEN:
+        required: true
+
+jobs:
+  create-prod-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout helm repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.helm_repo }}
+          ref: ${{ inputs.helm_base_branch }}
+          token: ${{ secrets.HELM_REPO_TOKEN }}
+          path: helm-repo
+
+      - name: Validate values file exists
+        working-directory: helm-repo
+        run: test -f "${{ inputs.values_file }}"
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Update values file
+        working-directory: helm-repo
+        env:
+          NEW_TAG: ${{ inputs.image_tag }}
+          YAML_PATH: ${{ inputs.yaml_path }}
+          VALUES_FILE: ${{ inputs.values_file }}
+        run: |
+          yq -i "${YAML_PATH} = strenv(NEW_TAG)" "$VALUES_FILE"
+          cat "$VALUES_FILE"
+
+      - name: Prepare release branch
+        id: meta
+        working-directory: helm-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_name="${{ github.event.repository.name }}"
+          image_tag_slug="$(echo "${{ inputs.image_tag }}" | tr '/:@ ' '----')"
+          branch_name="${{ inputs.release_branch_prefix }}/${repo_name}/${image_tag_slug}"
+
+          if [[ -n "${{ inputs.pr_title }}" ]]; then
+            pr_title="${{ inputs.pr_title }}"
+          else
+            pr_title="release(${repo_name}): promote image to ${{ inputs.image_tag }}"
+          fi
+
+          if [[ -n "${{ inputs.pr_body }}" ]]; then
+            pr_body="${{ inputs.pr_body }}"
+          else
+            cat > pr_body.txt <<EOF
+This PR updates \`${{ inputs.values_file }}\` for the released image.
+
+- Service: \`${repo_name}\`
+- Image tag: \`${{ inputs.image_tag }}\`
+- Source release: \`${{ github.event.release.tag_name }}\`
+EOF
+            pr_body="$(cat pr_body.txt)"
+          fi
+
+          echo "branch_name=${branch_name}" >> "$GITHUB_OUTPUT"
+          echo "pr_title=${pr_title}" >> "$GITHUB_OUTPUT"
+          {
+            echo "pr_body<<EOF"
+            printf '%s\n' "$pr_body"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push release branch
+        id: commit
+        working-directory: helm-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ steps.meta.outputs.branch_name }}"
+          git add "${{ inputs.values_file }}"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "${{ inputs.commit_message }}"
+          git push origin HEAD:"${{ steps.meta.outputs.branch_name }}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or reuse PR
+        if: steps.commit.outputs.changed == 'true'
+        working-directory: helm-repo
+        env:
+          GH_TOKEN: ${{ secrets.HELM_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing_pr="$(gh pr list \
+            --repo "${{ inputs.helm_repo }}" \
+            --base "${{ inputs.helm_base_branch }}" \
+            --head "${{ steps.meta.outputs.branch_name }}" \
+            --json url \
+            --jq '.[0].url')"
+
+          if [[ -n "${existing_pr}" ]]; then
+            echo "PR already exists: ${existing_pr}"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "${{ inputs.helm_repo }}" \
+            --base "${{ inputs.helm_base_branch }}" \
+            --head "${{ steps.meta.outputs.branch_name }}" \
+            --title "${{ steps.meta.outputs.pr_title }}" \
+            --body "${{ steps.meta.outputs.pr_body }}"
